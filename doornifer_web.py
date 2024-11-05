@@ -1,4 +1,4 @@
-from flask import Flask, render_template_string, request
+from flask import Flask, render_template_string, request, redirect
 import os
 from gpiozero import DigitalInputDevice, MotionSensor
 from signal import pause
@@ -26,7 +26,7 @@ USE_MOTION_SENSOR = False
 USE_DOOR_TOGGLE = True
 PULL_UP = True
 
-CLIP_DIR = "/home/chadrick/clips"
+CLIP_DIR = "/home/pi/clips"
 HOST, PORT = '0.0.0.0', 8080
 MINIMUM_AUDIO_CLIP_SIZE = 100
 WAIT_DELAY_SEC = 1
@@ -44,20 +44,34 @@ doorOpen = False
 lastOpened = now()
 enabled = True
 
-
 app = Flask(__name__)
 
+with open('doornifer_web.html') as f:
+    HTML_TEMPLATE = f.read()
+
+_log = "System initialized"
+
+def log(msg):
+    global _log
+    _log += '\n'
+    _log += msg
+    print(msg)
 
 
-def play_clip(clip):
-    t = Thread(target=system, args=(f'aplay {clip}',))
-    t.start()
-    t.join()
-
+def play_clip(clip=None):
+    if not clip:
+        clip = join(CLIP_DIR, choice(clips))
+    log(f'Playing clip {clip.split("/")[-1]}')
+    # system(f'aplay {clip}')
+    subprocess.run(['aplay', clip], capture_output=False)
+    # t = Thread(target=system, args=(f'aplay {clip}',))
+    # t.start()
+    # t.join()
 
 def door_opened():
-    global clips, doorOpen, lastOpened
+    global doorOpen, lastOpened
     doorOpen = not doorOpen
+    log(f"Sensor tripped! Door is now {'open' if doorOpen else 'closed'}")
 
     if ((doorOpen or not USE_DOOR_TOGGLE) and
         (now() - lastOpened > WAIT_DELAY_SEC) and
@@ -65,24 +79,12 @@ def door_opened():
         enabled
         ):
         lastOpened = now()
-        clip = choice(clips)
-        play_clip(join(CLIP_DIR, clip))
+        play_clip()
 
     if not enabled:
         print('Not playing, muted')
 
-
-
-def setVolume(percentage):
-    system(f'amixer sset Headphone {percentage}% -M')
-
-
-# Global variable to hold log messages
-log = "System initialized."
-
-
 def get_system_volume():
-    # Example command to get system volume (this might need adjustment depending on the OS)
     result = subprocess.run(["amixer", "get", "Master"], capture_output=True, text=True)
     for line in result.stdout.splitlines():
         if "Playback" in line and "%" in line:
@@ -90,100 +92,80 @@ def get_system_volume():
     return 0
 
 def set_system_volume(change):
-    # Example command to change system volume (this might need adjustment depending on the OS)
     subprocess.run(["amixer", "set", "Master", f"{change}%+"], capture_output=False)
-    global log
-    log += f"\nSystem volume changed by {change}%"
-    print(f"System volume changed by {change}%")
+    # system(f'amixer sset Headphone {percentage}% -M')
+    log(f"System volume changed by {change}%")
 
-# HTML Template for the webpage
-HTML_TEMPLATE = """
-<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
-    <title>Flask Button Page</title>
-  </head>
-  <body>
-    <h1>Flask Button Webpage</h1>
-    <div>
-      <button onclick="window.location.href='/play_sound'">Call Function One</button>
-      The door is currently {{ "open" if doorOpen else "closed" }}
-      <button onclick="window.location.href='/set_door_closed'">Set door as closed</button>
-      <button onclick="window.location.href='/set_door_open'">Set door as open</button>
-
-    </div>
-    <h2>Files in Directory</h2>
-    <ul>
-      {% for file in files %}
-        <li><a href="/handle_file/{{ file }}">{{ file }}</a></li>
-      {% endfor %}
-    </ul>
-    <h2>System Volume</h2>
-    <div>
-      <p>Current Volume: {{ volume }}%</p>
-      <button onclick="window.location.href='/volume_up'">+</button>
-      <button onclick="window.location.href='/volume_down'">-</button>
-    </div>
-    <h2>Log</h2>
-    <pre>{{ log }}</pre>
-  </body>
-</html>
-"""
 
 @app.route('/')
 def index():
-    # List files in the specified directory
-    files = os.listdir(CLIP_DIR) if os.path.exists(CLIP_DIR) else []
-    volume = get_system_volume()
-    return render_template_string(HTML_TEMPLATE, files=files, volume=volume, log=log)
+    return render_template_string(HTML_TEMPLATE, files=clips, volume=get_system_volume(), log=log)
 
 @app.route('/play_sound')
 def play_sound():
-    global log
-    log += "\nFunction One Called"
-    print("Function One Called")
-    return "Function One was called! <a href='/'>Go Back</a>"
+    play_clip()
+    return redirect('/')
 
 @app.route('/set_door_open')
 def set_door_open():
-    global log
-    log += "\nFunction Two Called"
-    print("Function Two Called")
-    return "Function Two was called! <a href='/'>Go Back</a>"
+    global doorOpen
+    doorOpen = True
+    log('Door manually set to open')
+    return redirect('/')
 
 @app.route('/set_door_closed')
 def set_door_closed():
-    global log
-    log += "\nFunction Two Called"
-    print("Function Two Called")
-    return "Function Two was called! <a href='/'>Go Back</a>"
+    global doorOpen
+    doorOpen = False
+    log('Door manually set to closed')
+    return redirect('/')
 
 @app.route('/handle_file/<path:filename>')
 def handle_file(filename):
-    file_path = os.path.join(CLIP_DIR, filename)
-    global log
-    log += f"\nFile clicked: {file_path}"
-    print(f"File clicked: {file_path}")
-    return f"File '{filename}' was clicked! <a href='/'>Go Back</a>"
+    play_clip(join(CLIP_DIR, filename))
+    return redirect('/')
 
 @app.route('/volume_up')
 def volume_up():
     set_system_volume(5)
-    return "Volume increased by 5%! <a href='/'>Go Back</a>"
+    return redirect('/')
 
 @app.route('/volume_down')
 def volume_down():
     set_system_volume(-5)
-    return "Volume decreased by 5%! <a href='/'>Go Back</a>"
+    return redirect('/')
+
+@app.route('/upload', methods=['POST'])
+def upload_file():
+    if 'file' not in request.files:
+        return "No file part! <a href='/'>Go Back</a>"
+    file = request.files['file']
+    if file.filename == '':
+        return "No selected file! <a href='/'>Go Back</a>"
+    if file:
+        file.save(os.path.join(CLIP_DIR, 'uploaded_' + file.filename))
+        log(f"File uploaded: {file.filename}")
+        return f"File '{file.filename}' uploaded successfully! <a href='/'>Go Back</a>"
+
+@app.route('/upload_audio', methods=['POST'])
+def upload_audio():
+    if 'audio' not in request.files:
+        return "No audio file part! <a href='/'>Go Back</a>"
+    audio = request.files['audio']
+    if audio.filename == '':
+        return "No selected audio file! <a href='/'>Go Back</a>"
+    if audio:
+        audio.save(os.path.join(CLIP_DIR, 'recorded_' + audio.filename))
+        log(f"\nAudio file uploaded: {audio.filename}")
+        return f"Audio file '{audio.filename}' uploaded successfully! <a href='/'>Go Back</a>"
+
 
 if __name__ == "__main__":
     sensor = DigitalInputDevice(HALL_SENSOR_PIN, PULL_UP)
     sensor.when_activated = door_opened
 
     # First set the starting volume
-    setVolume(volume)
+    set_system_volume(volume)
 
     # Run the app on the local network, accessible to other devices on the same network
     app.run(host=HOST, port=PORT, debug=True)

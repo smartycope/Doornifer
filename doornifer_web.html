@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <title>Flask Button Page</title>
+  </head>
+  <body>
+    <h1>Flask Button Webpage</h1>
+    <div>
+      <button onclick="window.location.href='/play_sound'">Call Function One</button>
+      The door is currently {{ "open" if doorOpen else "closed" }}
+      <button onclick="window.location.href='/set_door_closed'">Set door as closed</button>
+      <button onclick="window.location.href='/set_door_open'">Set door as open</button>
+
+    </div>
+    <h2>Files in Directory</h2>
+    <ul>
+      {% for file in files %}
+        <li><a href="/handle_file/{{ file }}">{{ file }}</a></li>
+      {% endfor %}
+    </ul>
+    <h2>System Volume</h2>
+    <div>
+      <p>Current Volume: {{ volume }}%</p>
+      <button onclick="window.location.href='/volume_up'">+</button>
+      <button onclick="window.location.href='/volume_down'">-</button>
+    </div>
+    <h2>Upload a File</h2>
+    <form action="/upload" method="post" enctype="multipart/form-data">
+      <input type="file" name="file">
+      <input type="submit" value="Upload">
+    </form>
+    <h2>Log</h2>
+    <pre>{{ log }}</pre>
+       <h2>Record Audio</h2>
+    <div>
+      <button onclick="startRecording()">Start Recording</button>
+      <button onclick="stopRecording()">Stop Recording</button>
+    </div>
+    <script>
+
+      let mediaRecorder;
+      let audioChunks = [];
+
+      async function startRecording() {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        mediaRecorder = new MediaRecorder(stream);
+        mediaRecorder.start();
+
+        mediaRecorder.ondataavailable = event => {
+          audioChunks.push(event.data);
+        };
+
+        console.log("Recording started");
+      }
+
+      function stopRecording() {
+        mediaRecorder.stop();
+        mediaRecorder.onstop = () => {
+          const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
+          const formData = new FormData();
+          formData.append('audio', audioBlob, 'recording.wav');
+
+          fetch('/upload_audio', {
+            method: 'POST',
+            body: formData
+          }).then(response => response.text())
+          .then(data => {
+            console.log(data);
+            window.location.reload();
+          });
+
+          audioChunks = [];
+          console.log("Recording stopped");
+        };
+      }
+    </script>
+  </body>
+</html>
